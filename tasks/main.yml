@@ -14,7 +14,8 @@
     group:          unbound
     mode:           '0644'
     force:          true
-  register:         root_dns
+  notify:
+  - unbound restart
   become:           true
   
 - name: copy unbound conf
@@ -24,7 +25,8 @@
     owner:          root
     group:          root
     mode:           '0644'
-  register:         unbound_conf
+  notify:
+  - unbound reload
   become:           true
   
 - name: copy static_routes conf
@@ -34,7 +36,8 @@
     owner:          root
     group:          root
     mode:           '0644'
-  register:         static_routes_conf
+  notify:
+  - unbound reload
   become:           true
   
 - name: create logs folder
@@ -44,6 +47,8 @@
     owner:          unbound
     group:          unbound
     mode:           '0755'
+  notify:
+  - unbound restart
   become:           true
   
 # from https://b4d.sablun.org/blog/2018-09-27-when-unbound-wont-write-logs
@@ -55,7 +60,9 @@
     owner:          root
     group:          root
     mode:           '0644'
-  register:         apparmor_for_unbound
+  register:         apparmor_local_for_unbound
+  notify:
+  - unbound restart
   become:           true
   
 - name: apparmor conf for unbound log
@@ -66,11 +73,14 @@
     owner:          root
     group:          root
     mode:           '0644'
+  register:         apparmor_for_unbound
+  notify:
+  - unbound restart
   become:           true
   
 - name: reload apparmor conf if needed
   shell:            "apparmor_parser -r /etc/apparmor.d/usr.sbin.unbound"
-  when:             apparmor_for_unbound.changed
+  when:             apparmor_local_for_unbound is changed or apparmor_for_unbound is changed
   become:           true
   
 # from https://blobfolio.com/2017/05/fix-linux-dns-issues-caused-by-systemd-resolved
@@ -104,58 +114,46 @@
   register:         unbound_launch_order
   become:           true
   
-- name: reload systemd if needed
+- name: stop systemd-resolved on launch order or network conf change
   systemd:
+    state:          stopped
+    name:           systemd-resolved
     daemon_reload:  true
-  when:             unbound_launch_order.changed
+  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed
   become:           true
   
-- name: enable service unbound-resolvconf
+- name: stop unbound on launch order or network conf change
+  systemd:
+    state:          stopped
+    name:           unbound
+    daemon_reload:  true
+  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed
+  become:           true
+  
+- name: ensure service unbound-resolvconf is enable and not masked
   systemd:
     enabled:        yes
     masked:         no
     name:           unbound-resolvconf
   become:           true
   
-- name: enable service unbound
+- name: ensure service unbound is enable and not masked
   systemd:
     enabled:        yes
     masked:         no
     name:           unbound
   become:           true
   
-- name: stop systemd-resolved on launch order or network conf change
+- name: ensure service unbound is started
   systemd:
-    state:          stopped
-    name:           systemd-resolved
-  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed
-  become:           true
-  
-- name: start service unbound
-  systemd:
-    state:          restarted
-    enabled:        true
+    state:          started
     name:           unbound
-  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed or root_dns.changed or apparmor_for_unbound.changed
+  register:         unbound_start
   become:           true
   
-- name: start systemd-resolved on launch order or network conf change
+- name: ensure service systemd-resolved is started
   systemd:
     state:          started
     name:           systemd-resolved
-  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed
   become:           true
   
-- name: reload service unbound on config change
-  systemd:
-    state:          reloaded
-    name:           unbound
-  when:             not root_dns.changed and ( unbound_conf.changed or static_routes_conf.changed )
-  become:           true
-  
-- name: start service unbound
-  systemd:
-    state:          started
-    enabled:        true
-    name:           unbound
-  become:           true

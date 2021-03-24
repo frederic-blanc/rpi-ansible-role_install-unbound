@@ -1,0 +1,18 @@
+---
+- name: unbound restart
+  service: 
+    name:   unbound
+    state:  restarted
+  when:     unbound_start is not changed
+  register: unbound_restart
+  become:   true
+  
+- name: unbound reload
+  service: 
+    name:   unbound
+    state:  reloaded
+  when:
+  - unbound_start   is not changed
+  - unbound_restart is not defined and unbound_restart is not changed
+  become:   true
+  
