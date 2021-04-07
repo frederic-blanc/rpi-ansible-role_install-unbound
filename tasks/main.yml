@@ -3,7 +3,8 @@
   apt:
     name:           "unbound"
     force_apt_get:  yes
-  register:         unbound_install
+  notify:
+  - unbound restart
   become:           true
   
 - name: download latest root DNS
@@ -103,31 +104,25 @@
     group:          root
     mode:           '0644'
   register:         networking_conf_for_unbound
+  notify:
+  - unbound restart
   become:           true
   
-- name: launch unbound before systemd-resolved.service
+- name: disable resolved DNSStubListener support
   lineinfile:
-    path:           "/lib/systemd/system/unbound.service"
+    path:           "/etc/systemd/resolved.conf"
     state:          present
-    regexp:         '^Before=nss-lookup.target.*$'
-    line:           'Before=nss-lookup.target systemd-resolved.service'
-  register:         unbound_launch_order
+    regexp:         '^#?DNSStubListener=.*$'
+    line:           'DNSStubListener=no'
+  register:         disable_dns_stub_listener_support
   become:           true
   
-- name: stop systemd-resolved on launch order or network conf change
+- name: restart systemd-resolved on disable DNSStubListener or network conf change
   systemd:
-    state:          stopped
+    state:          restarted
     name:           systemd-resolved
     daemon_reload:  true
-  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed
-  become:           true
-  
-- name: stop unbound on launch order or network conf change
-  systemd:
-    state:          stopped
-    name:           unbound
-    daemon_reload:  true
-  when:             unbound_install.changed or networking_conf_for_unbound.changed or unbound_launch_order.changed
+  when:             networking_conf_for_unbound.changed or disable_dns_stub_listener_support.changed
   become:           true
   
 - name: ensure service unbound-resolvconf is enable and not masked
@@ -149,11 +144,5 @@
     state:          started
     name:           unbound
   register:         unbound_start
-  become:           true
-  
-- name: ensure service systemd-resolved is started
-  systemd:
-    state:          started
-    name:           systemd-resolved
   become:           true
   
